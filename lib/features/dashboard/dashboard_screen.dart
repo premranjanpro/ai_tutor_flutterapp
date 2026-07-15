@@ -5,6 +5,7 @@ import '../authentication/login_screen.dart';
 import '../onboarding/family_provider.dart';
 import '../conversation/chat_screen.dart';
 import '../learning/learning_modules.dart';
+import '../learning/flashcard_screen.dart';
 import '../career/interview_screen.dart';
 import '../parent/parent_dashboard.dart';
 
@@ -185,6 +186,54 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                   onTap: () {
                     Navigator.of(context).push(
                       MaterialPageRoute(builder: (context) => QuizScreen(memberId: child.id)),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          const Text(
+            'Interactive Study Cards ("Ye Kya Hai?"):',
+            style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: _buildKidsActivityCard(
+                  icon: Icons.abc,
+                  title: 'English',
+                  color: Colors.greenAccent,
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(builder: (context) => const FlashcardScreen(deckType: 'english')),
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildKidsActivityCard(
+                  icon: Icons.calculate,
+                  title: 'Math (1+2)',
+                  color: Colors.purpleAccent,
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(builder: (context) => const FlashcardScreen(deckType: 'math')),
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildKidsActivityCard(
+                  icon: Icons.translate,
+                  title: 'Hindi',
+                  color: Colors.pinkAccent,
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(builder: (context) => const FlashcardScreen(deckType: 'hindi')),
                     );
                   },
                 ),

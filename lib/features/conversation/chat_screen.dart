@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'conversation_provider.dart';
 import '../../core/audio/voice_activity_detector.dart';
+import '../learning/flashcard_screen.dart';
 
 class ChatScreen extends ConsumerStatefulWidget {
   final String memberId;
@@ -77,6 +78,77 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     });
   }
 
+  void _handleInterceptCommand(String rawCommand) {
+    // Format: COMMAND:type:target|friendlyResponse
+    final parts = rawCommand.split('|');
+    if (parts.isEmpty) return;
+    
+    final cmd = parts[0].replaceAll('COMMAND:', '');
+    final cmdParts = cmd.split(':');
+    if (cmdParts.length < 2) return;
+
+    final type = cmdParts[0];
+    final target = cmdParts[1];
+
+    if (!mounted) return;
+    final navigator = Navigator.of(context);
+
+    if (type == 'launch_deck') {
+      Future.microtask(() {
+        navigator.push(
+          MaterialPageRoute(builder: (context) => FlashcardScreen(deckType: target)),
+        );
+      });
+    } else if (type == 'launch_app') {
+      Future.microtask(() {
+        if (!mounted) return;
+        _showAppLauncherDialog(target);
+      });
+    }
+  }
+
+  void _showAppLauncherDialog(String appName) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        // Automatically close the dialog after 3 seconds, mimicking returning to the app
+        Timer(const Duration(seconds: 3), () {
+          if (Navigator.canPop(context)) Navigator.pop(context);
+        });
+
+        return Dialog.fullscreen(
+          backgroundColor: const Color(0xFF0F172A),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const CircularProgressIndicator(color: Color(0xFF6366F1)),
+              const SizedBox(height: 24),
+              Icon(
+                appName == 'facebook'
+                    ? Icons.facebook
+                    : appName == 'instagram'
+                        ? Icons.camera_alt
+                        : Icons.local_taxi,
+                size: 80,
+                color: const Color(0xFF818CF8),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Launching ${appName.toUpperCase()}...',
+                style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold, fontFamily: 'Outfit'),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Transitioning to third-party app secure sandbox.',
+                style: TextStyle(color: Color(0xFF64748B)),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final ConversationState chatState = ref.watch(conversationProvider);
@@ -86,6 +158,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     ref.listen<ConversationState>(conversationProvider, (prev, next) {
       if (prev?.messages.length != next.messages.length) {
         Future.delayed(const Duration(milliseconds: 100), _scrollToBottom);
+        
+        // Check if latest message is a command
+        if (next.messages.isNotEmpty) {
+          final lastMsg = next.messages.last;
+          if (!lastMsg.isUser && lastMsg.text.startsWith('COMMAND:')) {
+            _handleInterceptCommand(lastMsg.text);
+          }
+        }
       }
     });
 
@@ -137,7 +217,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                       itemCount: chatState.messages.length,
                       itemBuilder: (context, index) {
                         final msg = chatState.messages[index];
-                        return _buildChatBubble(msg);
+                        // Strip internal command payload from display if needed
+                        String displayText = msg.text;
+                        if (displayText.startsWith('COMMAND:')) {
+                          final split = displayText.split('|');
+                          if (split.length > 1) displayText = split[1];
+                        }
+                        return _buildChatBubble(msg, displayText);
                       },
                     ),
             ),
@@ -160,6 +246,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                   ],
                 ),
               ),
+            // Quick suggested chips
+            if (!_handsFreeMode) _buildQuickSuggestionRow(),
             _handsFreeMode ? _buildHandsFreeArea(vad) : _buildTextInputBar(),
           ],
         ),
@@ -167,7 +255,41 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     );
   }
 
-  Widget _buildChatBubble(ChatMessage message) {
+  Widget _buildQuickSuggestionRow() {
+    final List<String> suggestions = [
+      '1+2',
+      'Open math deck',
+      'Open English deck',
+      'Open Facebook',
+      'Open Insta',
+      'Open Ola App'
+    ];
+
+    return Container(
+      height: 48,
+      color: const Color(0xFF0B0F19),
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        itemCount: suggestions.length,
+        itemBuilder: (context, index) {
+          final item = suggestions[index];
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4.0),
+            child: ActionChip(
+              backgroundColor: const Color(0xFF1E293B),
+              side: const BorderSide(color: Color(0xFF334155)),
+              label: Text(item, style: const TextStyle(color: Color(0xFF818CF8), fontSize: 11)),
+              onPressed: () => _send(item),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildChatBubble(ChatMessage message, String text) {
     final isMe = message.isUser;
     return Align(
       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
@@ -189,7 +311,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              message.text,
+              text,
               style: const TextStyle(color: Colors.white, fontSize: 15, height: 1.4),
             ),
             const SizedBox(height: 4),
