@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'conversation_provider.dart';
+import '../../core/audio/voice_activity_detector.dart';
 
 class ChatScreen extends ConsumerStatefulWidget {
   final String memberId;
@@ -18,11 +19,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   final _textController = TextEditingController();
   final _scrollController = ScrollController();
   
-  bool _voiceMode = false;
-  bool _isRecording = false;
-  double _pulseScale = 1.0;
-  Timer? _pulseTimer;
-  Timer? _speechTimer;
+  bool _handsFreeMode = false;
 
   @override
   void initState() {
@@ -34,8 +31,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   void dispose() {
     _textController.dispose();
     _scrollController.dispose();
-    _pulseTimer?.cancel();
-    _speechTimer?.cancel();
     super.dispose();
   }
 
@@ -55,52 +50,49 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     Future.delayed(const Duration(milliseconds: 100), _scrollToBottom);
   }
 
-  void _toggleVoiceMode() {
+  void _toggleHandsFree() {
     setState(() {
-      _voiceMode = !_voiceMode;
-      _isRecording = false;
-      _pulseScale = 1.0;
-      _pulseTimer?.cancel();
-      _speechTimer?.cancel();
+      _handsFreeMode = !_handsFreeMode;
     });
+
+    final vadNotifier = ref.read(vadProvider.notifier);
+    if (_handsFreeMode) {
+      vadNotifier.startVAD();
+    } else {
+      vadNotifier.stopVAD();
+    }
   }
 
-  void _startRecording() {
-    if (_isRecording) return;
-    setState(() {
-      _isRecording = true;
-    });
+  void _triggerWakeWord(String phrase) {
+    ref.read(vadProvider.notifier).triggerWakeWord(phrase, (action) {
+      String message = "Aarav said: $phrase";
+      _send(message);
 
-    _pulseTimer = Timer.periodic(const Duration(milliseconds: 600), (timer) {
-      setState(() {
-        _pulseScale = _pulseScale == 1.0 ? 1.3 : 1.0;
-      });
-    });
-
-    // Simulate Speech-to-Text translation after 3 seconds
-    _speechTimer = Timer(const Duration(seconds: 3), () async {
-      _stopRecording();
-      final mockSpeechText = 'Hello Dost! Teach me mathematics.';
-      await _send(mockSpeechText);
-    });
-  }
-
-  void _stopRecording() {
-    _pulseTimer?.cancel();
-    _speechTimer?.cancel();
-    setState(() {
-      _isRecording = false;
-      _pulseScale = 1.0;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('⚡ Event Triggered: $action'),
+          backgroundColor: const Color(0xFF06B6D4),
+        ),
+      );
     });
   }
 
   @override
   Widget build(BuildContext context) {
     final ConversationState chatState = ref.watch(conversationProvider);
+    final VadModel vad = ref.watch(vadProvider);
     
+    // Scroll automatically on new messages
     ref.listen<ConversationState>(conversationProvider, (prev, next) {
       if (prev?.messages.length != next.messages.length) {
         Future.delayed(const Duration(milliseconds: 100), _scrollToBottom);
+      }
+    });
+
+    // Listen to VAD processing triggers
+    ref.listen<VadModel>(vadProvider, (prev, next) {
+      if (next.state == VadState.processing && prev?.state != VadState.processing) {
+        _send("Aarav is speaking: Tell me about space!");
       }
     });
 
@@ -124,9 +116,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         ),
         actions: [
           IconButton(
-            icon: Icon(_voiceMode ? Icons.keyboard : Icons.mic, color: const Color(0xFF6366F1)),
-            onPressed: _toggleVoiceMode,
-            tooltip: _voiceMode ? 'Switch to Keyboard' : 'Switch to Voice Mode',
+            icon: Icon(
+              _handsFreeMode ? Icons.headset_mic : Icons.headset_off,
+              color: _handsFreeMode ? Colors.greenAccent : const Color(0xFF6366F1),
+            ),
+            onPressed: _toggleHandsFree,
+            tooltip: _handsFreeMode ? 'Disable Hands-Free VAD' : 'Enable Hands-Free VAD',
           ),
         ],
       ),
@@ -146,26 +141,26 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                       },
                     ),
             ),
-            if (chatState.isLoading)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 8.0),
+            if (chatState.isLoading || vad.state == VadState.processing)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8.0),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    SizedBox(
+                    const SizedBox(
                       width: 16,
                       height: 16,
                       child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF06B6D4)),
                     ),
-                    SizedBox(width: 8),
+                    const SizedBox(width: 8),
                     Text(
-                      'AI Dost is thinking...',
-                      style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13),
+                      vad.state == VadState.processing ? 'Speech Detected... Transcribing...' : 'AI Dost is thinking...',
+                      style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 13),
                     ),
                   ],
                 ),
               ),
-            _voiceMode ? _buildVoiceInputArea() : _buildTextInputBar(),
+            _handsFreeMode ? _buildHandsFreeArea(vad) : _buildTextInputBar(),
           ],
         ),
       ),
@@ -255,52 +250,83 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     );
   }
 
-  Widget _buildVoiceInputArea() {
+  Widget _buildHandsFreeArea(VadModel vad) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(vertical: 24),
+      padding: const EdgeInsets.all(20),
       color: const Color(0xFF1E293B),
       child: Column(
         children: [
-          Text(
-            _isRecording ? 'Listening...' : 'Tap Mic to Speak',
-            style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                vad.state == VadState.sleep
+                    ? Icons.bedtime
+                    : vad.state == VadState.speaking
+                        ? Icons.volume_up
+                        : Icons.graphic_eq,
+                color: vad.state == VadState.speaking ? Colors.greenAccent : const Color(0xFF06B6D4),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                vad.state == VadState.sleep
+                    ? 'App is on Table (Sleep Mode)'
+                    : vad.state == VadState.speaking
+                        ? 'VAD: User Speaking...'
+                        : 'VAD: Listening hands-free...',
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+              ),
+            ],
           ),
           const SizedBox(height: 16),
-          GestureDetector(
-            onTap: _isRecording ? _stopRecording : _startRecording,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 300),
-              padding: const EdgeInsets.all(20),
-              transformAlignment: Alignment.center,
-              transform: Matrix4.diagonal3Values(_pulseScale, _pulseScale, 1.0),
-              decoration: BoxDecoration(
-                color: _isRecording ? const Color(0xFFEF4444) : const Color(0xFF6366F1),
-                shape: BoxShape.circle,
-                boxShadow: [
-                  BoxShadow(
-                    color: (_isRecording ? const Color(0xFFEF4444) : const Color(0xFF6366F1)).withValues(alpha: 0.4),
-                    blurRadius: 15,
-                    spreadRadius: 2,
+          // Decibel Waveform Indicator
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: List.generate(
+              7,
+              (index) {
+                double height = 5.0 + (vad.dbLevel - 30) * (index % 3 + 1) * 0.4;
+                if (height > 50) height = 50;
+                return AnimatedContainer(
+                  duration: const Duration(milliseconds: 150),
+                  margin: const EdgeInsets.symmetric(horizontal: 3),
+                  width: 6,
+                  height: height,
+                  decoration: BoxDecoration(
+                    color: vad.state == VadState.speaking ? Colors.greenAccent : const Color(0xFF6366F1),
+                    borderRadius: BorderRadius.circular(3),
                   ),
-                ],
-              ),
-              child: Icon(
-                _isRecording ? Icons.mic : Icons.mic_none,
-                color: Colors.white,
-                size: 36,
-              ),
+                );
+              },
             ),
           ),
-          if (_isRecording) ...[
-            const SizedBox(height: 12),
-            const Text(
-              'Simulating voice speech transmission...',
-              style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
-            )
-          ]
+          const SizedBox(height: 16),
+          // Wake Word simulation triggers
+          const Text('SIMULATE WAKE WORD TRIGGERS:', style: TextStyle(color: Color(0xFF64748B), fontSize: 10, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            alignment: WrapAlignment.center,
+            children: [
+              _buildWakeButton('Hi Kia, play Hindi song'),
+              _buildWakeButton('Hi Kia, start movie'),
+              _buildWakeButton('Hi Kia, play rhyme'),
+              _buildWakeButton('Where are you Kia?'),
+            ],
+          )
         ],
       ),
+    );
+  }
+
+  Widget _buildWakeButton(String label) {
+    return ActionChip(
+      backgroundColor: const Color(0xFF0F172A),
+      side: const BorderSide(color: Color(0xFF334155)),
+      label: Text(label, style: const TextStyle(color: Color(0xFF818CF8), fontSize: 11)),
+      onPressed: () => _triggerWakeWord(label),
     );
   }
 }
