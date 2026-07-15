@@ -31,4 +31,7 @@ class SecureStorage {
     await _storage.delete(key: _userIdKey);
     await _storage.delete(key: _userNameKey);
   }
+
+  static Future<void> writeVal(String key, String val) => _storage.write(key: key, value: val);
+  static Future<String?> getVal(String key) => _storage.read(key: key);
 }

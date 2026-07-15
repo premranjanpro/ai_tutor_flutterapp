@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'conversation_provider.dart';
 import '../../core/audio/voice_activity_detector.dart';
 import '../learning/flashcard_screen.dart';
+import 'camera_scanner.dart';
 
 class ChatScreen extends ConsumerStatefulWidget {
   final String memberId;
@@ -79,7 +80,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   void _handleInterceptCommand(String rawCommand) {
-    // Format: COMMAND:type:target|friendlyResponse
     final parts = rawCommand.split('|');
     if (parts.isEmpty) return;
     
@@ -111,7 +111,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     showDialog(
       context: context,
       builder: (context) {
-        // Automatically close the dialog after 3 seconds, mimicking returning to the app
         Timer(const Duration(seconds: 3), () {
           if (Navigator.canPop(context)) Navigator.pop(context);
         });
@@ -149,17 +148,29 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     );
   }
 
+  void _triggerFaceScanner() {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return CameraScanner(
+          userName: widget.nickname,
+          onGreetingTriggered: (greeting) {
+            _send(greeting);
+          },
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final ConversationState chatState = ref.watch(conversationProvider);
     final VadModel vad = ref.watch(vadProvider);
     
-    // Scroll automatically on new messages
     ref.listen<ConversationState>(conversationProvider, (prev, next) {
       if (prev?.messages.length != next.messages.length) {
         Future.delayed(const Duration(milliseconds: 100), _scrollToBottom);
         
-        // Check if latest message is a command
         if (next.messages.isNotEmpty) {
           final lastMsg = next.messages.last;
           if (!lastMsg.isUser && lastMsg.text.startsWith('COMMAND:')) {
@@ -169,7 +180,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       }
     });
 
-    // Listen to VAD processing triggers
     ref.listen<VadModel>(vadProvider, (prev, next) {
       if (next.state == VadState.processing && prev?.state != VadState.processing) {
         _send("Aarav is speaking: Tell me about space!");
@@ -196,6 +206,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         ),
         actions: [
           IconButton(
+            icon: const Icon(Icons.camera_front, color: Colors.greenAccent),
+            onPressed: _triggerFaceScanner,
+            tooltip: 'Trigger Face Scan Greeting',
+          ),
+          IconButton(
             icon: Icon(
               _handsFreeMode ? Icons.headset_mic : Icons.headset_off,
               color: _handsFreeMode ? Colors.greenAccent : const Color(0xFF6366F1),
@@ -208,6 +223,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       body: SafeArea(
         child: Column(
           children: [
+            // Interactive Female AI Anchor Avatar Representation Card
+            _buildAvatarCard(chatState, vad),
             Expanded(
               child: chatState.messages.isEmpty && chatState.isLoading
                   ? const Center(child: CircularProgressIndicator(color: Color(0xFF6366F1)))
@@ -217,7 +234,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                       itemCount: chatState.messages.length,
                       itemBuilder: (context, index) {
                         final msg = chatState.messages[index];
-                        // Strip internal command payload from display if needed
                         String displayText = msg.text;
                         if (displayText.startsWith('COMMAND:')) {
                           final split = displayText.split('|');
@@ -246,11 +262,75 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                   ],
                 ),
               ),
-            // Quick suggested chips
             if (!_handsFreeMode) _buildQuickSuggestionRow(),
             _handsFreeMode ? _buildHandsFreeArea(vad) : _buildTextInputBar(),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildAvatarCard(ConversationState chatState, VadModel vad) {
+    IconData avatarIcon = Icons.face;
+    String statusLabel = 'Idle';
+    Color iconColor = Colors.white70;
+
+    if (chatState.isLoading) {
+      avatarIcon = Icons.record_voice_over;
+      statusLabel = 'Speaking';
+      iconColor = const Color(0xFF06B6D4);
+    } else if (vad.state == VadState.speaking) {
+      avatarIcon = Icons.hearing;
+      statusLabel = 'Listening';
+      iconColor = Colors.greenAccent;
+    }
+
+    return Container(
+      margin: const EdgeInsets.all(12),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E293B),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFF334155)),
+      ),
+      child: Row(
+        children: [
+          CircleAvatar(
+            radius: 28,
+            backgroundColor: const Color(0xFF0F172A),
+            child: Icon(avatarIcon, color: iconColor, size: 32),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Kia - AI News Anchor Model',
+                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                ),
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        color: chatState.isLoading || vad.state == VadState.speaking ? Colors.green : Colors.amber,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      'State: $statusLabel',
+                      style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -402,7 +482,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             ],
           ),
           const SizedBox(height: 16),
-          // Decibel Waveform Indicator
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: List.generate(
@@ -424,7 +503,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             ),
           ),
           const SizedBox(height: 16),
-          // Wake Word simulation triggers
           const Text('SIMULATE WAKE WORD TRIGGERS:', style: TextStyle(color: Color(0xFF64748B), fontSize: 10, fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
           Wrap(
