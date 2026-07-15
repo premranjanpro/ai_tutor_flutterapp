@@ -5,25 +5,25 @@ import '../authentication/auth_provider.dart';
 class MemoryItem {
   final String id;
   final String content;
-  final String type;
-  final double importance;
+  final String status;
   final String sensitivity;
+  final double importance;
 
   MemoryItem({
     required this.id,
     required this.content,
-    required this.type,
-    required this.importance,
+    required this.status,
     required this.sensitivity,
+    required this.importance,
   });
 
   factory MemoryItem.fromJson(Map<String, dynamic> json) {
     return MemoryItem(
-      id: json['id'],
-      content: json['content'],
-      type: json['memoryType'] ?? 'learning_goal',
+      id: json['id'] ?? '',
+      content: json['content'] ?? '',
+      status: json['status'] ?? '',
+      sensitivity: json['sensitivity'] ?? '',
       importance: (json['importance'] as num?)?.toDouble() ?? 0.5,
-      sensitivity: json['sensitivity'] ?? 'low',
     );
   }
 }
@@ -38,11 +38,18 @@ class ParentDashboard extends ConsumerStatefulWidget {
 class _ParentDashboardState extends ConsumerState<ParentDashboard> {
   bool _loading = true;
   List<MemoryItem> _memories = [];
+  final _customPromptController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
     _fetchMemories();
+  }
+
+  @override
+  void dispose() {
+    _customPromptController.dispose();
+    super.dispose();
   }
 
   Future<void> _fetchMemories() async {
@@ -58,6 +65,29 @@ class _ParentDashboardState extends ConsumerState<ParentDashboard> {
       }
     } catch (e) {
       setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _saveCustomInstructions() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final text = _customPromptController.text.trim();
+    if (text.isEmpty) return;
+
+    try {
+      final client = ref.read(apiClientProvider);
+      final response = await client.dio.post(
+        '/api/family/custom-instructions',
+        data: {'instructions': text},
+      );
+      if (response.data['success'] == true) {
+        messenger.showSnackBar(
+          const SnackBar(content: Text('🤖 AI trained successfully with custom rules!'), backgroundColor: Colors.indigoAccent),
+        );
+      }
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('Failed to update AI prompt: $e'), backgroundColor: Colors.redAccent),
+      );
     }
   }
 
@@ -120,6 +150,61 @@ class _ParentDashboardState extends ConsumerState<ParentDashboard> {
             _buildProgressCard('Mathematics Core', 0.82, Colors.blueAccent),
             const SizedBox(height: 12),
             _buildProgressCard('Science & Space Study', 0.65, Colors.cyan),
+            const SizedBox(height: 24),
+            // Train AI Prompt box
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1E293B),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: const Color(0xFF334155)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Row(
+                    children: [
+                      Icon(Icons.edit_note, color: Colors.indigoAccent),
+                      SizedBox(width: 8),
+                      Text('Train Your AI Companion', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Add custom rules (e.g. "First teach A to Z, then Hindi, then Math, and allow YouTube only after 1 hour of study")',
+                    style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _customPromptController,
+                    style: const TextStyle(color: Colors.white),
+                    maxLines: 3,
+                    decoration: InputDecoration(
+                      hintText: 'Enter AI guidelines...',
+                      hintStyle: const TextStyle(color: Color(0xFF64748B)),
+                      filled: true,
+                      fillColor: const Color(0xFF0B0F19),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide.none,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: _saveCustomInstructions,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF6366F1),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                      child: const Text('Update AI Training Prompt', style: TextStyle(color: Colors.white)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
             const SizedBox(height: 32),
             Row(
               children: [
@@ -220,13 +305,21 @@ class _ParentDashboardState extends ConsumerState<ParentDashboard> {
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text(
-                  item.type.replaceAll('_', ' ').toUpperCase(),
-                  style: const TextStyle(color: Color(0xFFC7D2FE), fontSize: 10, fontWeight: FontWeight.bold),
+                  'Importance: ${(item.importance * 10).toInt()}/10',
+                  style: const TextStyle(color: Color(0xFFC7D2FE), fontSize: 11, fontWeight: FontWeight.bold),
                 ),
               ),
-              Text(
-                'Conf: ${(item.importance * 100).toInt()}%',
-                style: const TextStyle(color: Color(0xFF64748B), fontSize: 11),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: item.sensitivity == 'high' ? const Color(0xFF991B1B) : const Color(0xFF1E293B),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFF475569)),
+                ),
+                child: Text(
+                  item.sensitivity.toUpperCase(),
+                  style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                ),
               ),
             ],
           ),
@@ -237,17 +330,29 @@ class _ParentDashboardState extends ConsumerState<ParentDashboard> {
           ),
           const SizedBox(height: 16),
           Row(
-            mainAxisAlignment: MainAxisAlignment.end,
             children: [
-              TextButton(
-                onPressed: () => _reject(item.id),
-                child: const Text('Reject', style: TextStyle(color: Colors.redAccent)),
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: () => _approve(item.id),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  icon: const Icon(Icons.check, color: Colors.white, size: 16),
+                  label: const Text('Approve', style: TextStyle(color: Colors.white, fontSize: 12)),
+                ),
               ),
-              const SizedBox(width: 8),
-              ElevatedButton(
-                onPressed: () => _approve(item.id),
-                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF6366F1)),
-                child: const Text('Approve', style: TextStyle(color: Colors.white)),
+              const SizedBox(width: 12),
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: () => _reject(item.id),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF475569),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  icon: const Icon(Icons.close, color: Colors.white, size: 16),
+                  label: const Text('Reject', style: TextStyle(color: Colors.white, fontSize: 12)),
+                ),
               ),
             ],
           ),
