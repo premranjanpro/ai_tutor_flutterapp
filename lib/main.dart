@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'features/authentication/auth_provider.dart';
 import 'features/authentication/login_screen.dart';
-import 'features/onboarding/family_setup_screen.dart';
+import 'features/onboarding/permission_screen.dart';
 
 void main() {
   runApp(
@@ -21,7 +21,7 @@ class MyApp extends ConsumerWidget {
 
     Widget homeScreen;
     if (authState is AuthenticatedState) {
-      homeScreen = const FamilySetupScreen();
+      homeScreen = const PermissionScreen();
     } else {
       homeScreen = const LoginScreen();
     }
